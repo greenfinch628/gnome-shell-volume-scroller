@@ -1,5 +1,7 @@
 import Clutter from "gi://Clutter";
 import Gio from "gi://Gio";
+import GLib from "gi://GLib";
+import Gvc from "gi://Gvc";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import * as Volume from "resource:///org/gnome/shell/ui/status/volume.js";
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
@@ -13,6 +15,7 @@ const VolumeScrollerIcons = [
 ];
 
 const CACHE_TTL_MS = 500;
+const FEEDBACK_DELAY_MS = 30;
 
 // Modifiers considered by the "none-exclusive" option. Other state bits such as
 // NumLock (MOD2), CapsLock (LOCK) and mouse button masks are ignored.
@@ -70,6 +73,8 @@ export default class VolumeScrollerExtension extends Extension {
     setMiddleClick();
     setModifier();
 
+    this._feedbackTimeoutId = 0;
+    this._feedbackCancellable = null;
     this.scroll_binding = null;
     this.click_binding = null;
     this.sink_binding = null;
@@ -83,6 +88,11 @@ export default class VolumeScrollerExtension extends Extension {
       this.settings.connect("changed::invert-scroll", setDirection),
       this.settings.connect("changed::enable-middle-click", setMiddleClick),
       this.settings.connect("changed::modifier-key", setModifier),
+      this.settings.connect("changed::enable-sound-feedback", () => {
+        if (!this.settings.get_boolean("enable-sound-feedback")) {
+          this._cancelFeedback();
+        }
+      }),
     ];
 
     this.enabled = true;
@@ -124,6 +134,7 @@ export default class VolumeScrollerExtension extends Extension {
   }
 
   disable() {
+    this._cancelFeedback();
     for (const id of this.settings_bindings) {
       this.settings.disconnect(id);
     }
@@ -176,7 +187,13 @@ export default class VolumeScrollerExtension extends Extension {
       return Clutter.EVENT_PROPAGATE;
     }
 
-    let volume = this.sink.volume;
+    if (!this.sink) {
+      return Clutter.EVENT_PROPAGATE;
+    }
+
+    const previousVolume = this.sink.volume;
+    const wasMuted = this.sink.is_muted;
+    let volume = previousVolume;
 
     const multiplier = this.direction ? -1 : 1;
     switch (event.get_scroll_direction()) {
@@ -200,8 +217,47 @@ export default class VolumeScrollerExtension extends Extension {
     this.sink.volume = volume;
     this.sink.push_volume();
 
+    if (this.sink.volume !== previousVolume || this.sink.is_muted !== wasMuted) {
+      this._queueFeedback();
+    }
+
     this._show_volume(volume);
     return Clutter.EVENT_STOP;
+  }
+
+  _queueFeedback() {
+    if (this._feedbackTimeoutId || !this.settings.get_boolean("enable-sound-feedback")) {
+      return;
+    }
+
+    // Coalesce nearby scroll ticks and give the mixer time to apply the change.
+    this._feedbackTimeoutId = GLib.timeout_add_once(GLib.PRIORITY_DEFAULT, FEEDBACK_DELAY_MS, () => {
+      this._feedbackTimeoutId = 0;
+      this._cancelFeedback();
+
+      if (!this.sink || this.sink.is_muted || this.sink.volume === 0 ||
+          this.sink.state === Gvc.MixerStreamState.RUNNING ||
+          !this.systemSoundSettings.get_boolean("event-sounds")) {
+        return;
+      }
+
+      this._feedbackCancellable = new Gio.Cancellable();
+      global.display.get_sound_player().play_from_theme(
+        this.settings.get_string("feedback-sound"),
+        "Volume changed",
+        this._feedbackCancellable
+      );
+    });
+  }
+
+  _cancelFeedback() {
+    if (this._feedbackTimeoutId) {
+      GLib.Source.remove(this._feedbackTimeoutId);
+      this._feedbackTimeoutId = 0;
+    }
+
+    this._feedbackCancellable?.cancel();
+    this._feedbackCancellable = null;
   }
 
   _handle_button_press(_actor, event) {
@@ -228,6 +284,7 @@ export default class VolumeScrollerExtension extends Extension {
   }
 
   _handle_sink_change(controller, id) {
+    this._cancelFeedback();
     this.sink = controller.lookup_stream_id(id);
   }
 

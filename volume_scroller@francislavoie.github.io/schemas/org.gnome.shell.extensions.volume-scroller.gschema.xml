@@ -30,5 +30,21 @@
       <summary>Required modifier key</summary>
       <description>Only change the volume on scroll while this modifier key is held down. "none" means scrolling always changes the volume. "none-exclusive" means scrolling changes the volume only when none of Ctrl, Alt, Shift or Super is held.</description>
     </key>
+    <key name="enable-sound-feedback" type="b">
+      <default>true</default>
+      <summary>Enable sound feedback</summary>
+      <description>Play sound feedback when scrolling changes the volume.</description>
+    </key>
+    <key name="feedback-sound" type="s">
+      <choices>
+        <choice value="audio-volume-change" />
+        <choice value="bell" />
+        <choice value="dialog-information" />
+        <choice value="message" />
+      </choices>
+      <default>'audio-volume-change'</default>
+      <summary>Feedback sound</summary>
+      <description>Sound theme event to play when scrolling changes the volume.</description>
+    </key>
   </schema>
 </schemalist>

@@ -31,6 +31,36 @@ export default class VolumeScrollerExtensionPreferences extends ExtensionPrefere
     });
     group.add(modifierRow);
 
+    const feedbackSwitch = new Adw.SwitchRow({ title: 'Enable Sound Feedback' });
+    const feedbackSounds = [
+      ['audio-volume-change', 'GNOME System Menu'],
+      ['bell', 'Bell'],
+      ['dialog-information', 'Information'],
+      ['message', 'Message'],
+    ];
+    const feedbackRow = new Adw.ComboRow({
+      title: 'Feedback Sound',
+      model: Gtk.StringList.new(feedbackSounds.map(([, label]) => label)),
+    });
+    group.add(feedbackSwitch);
+    group.add(feedbackRow);
+
+    const settings = window._settings;
+    settings.bind('enable-sound-feedback', feedbackSwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
+    settings.bind('enable-sound-feedback', feedbackRow, 'sensitive', Gio.SettingsBindFlags.GET);
+    const updateFeedbackSound = () => {
+      const sound = settings.get_string('feedback-sound');
+      feedbackRow.selected = Math.max(0, feedbackSounds.findIndex(([event]) => event === sound));
+    };
+    updateFeedbackSound();
+    settings.connect('changed::feedback-sound', updateFeedbackSound);
+    feedbackRow.connect('notify::selected', () => {
+      const sound = feedbackSounds[feedbackRow.selected];
+      if (sound) {
+        settings.set_string('feedback-sound', sound[0]);
+      }
+    });
+
     // Create the value picker
     const granularityEntry = new Gtk.SpinButton({
       adjustment: new Gtk.Adjustment({ step_increment: 1, lower: 1, upper: 50 }),
